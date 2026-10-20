@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blog · Edward Zhu</title>
+  <meta name="description" content="Blog posts by Edward Zhu.">
+  <meta name="theme-color" content="#f4ecda" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0e1626" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300..700&amp;family=DM+Mono:wght@400;500&amp;family=Fraunces:ital,opsz,wght,SOFT,WONK@0,9..144,300..800,0..100,0..1;1,9..144,300..800,0..100,0..1&amp;display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script src="main.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="masthead wrap">
+    <a class="brand" href="index.html" aria-label="Edward Zhu, home">
+      <span class="seal" aria-hidden="true">EZ</span>
+      <span class="brand-name">Edward Zhu</span>
+    </a>
+    <nav aria-label="Primary">
+      <ul>
+        <li><a href="projects.html">Projects</a></li>
+        <li><a href="blog.html">Blog</a></li>
+        <li><a href="index.html#about">About</a></li>
+        <li><a class="btn-outline" href="assets/resume.pdf" target="_blank" rel="noopener">Resume <span aria-hidden="true">↗</span></a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main id="main">
+    <header class="page-head wrap narrow">
+      <a class="back" href="index.html"><span aria-hidden="true">←</span> Home</a>
+      <h1>Blog</h1>
+      <div class="sort">
+        <label for="post-sort">Sort</label>
+        <span class="select-wrap">
+          <select id="post-sort" data-sorts=".page-body .cards">
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+          </select>
+        </span>
+      </div>
+    </header>
+
+    <section class="page-body wrap narrow" aria-label="All posts">
+      <!--
+        To add a post, copy blog/_template.html to blog/your-post.html, write it, then list it here
+        (newest first) inside <ul class="cards">:
+
+        <li class="card">
+          <div class="card-head">
+            <h3><a class="card-link" href="blog/your-post.html">Post title</a></h3>
+            <time class="card-meta" datetime="2026-10-20">Oct 20, 2026</time>
+          </div>
+          <p>A one- or two-sentence summary.</p>
+        </li>
+      -->
+      <p class="empty">No posts yet. Check back soon.</p>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="seigaiha" aria-hidden="true"></div>
+    <div class="wrap footer-inner">
+      <div class="footer-row">
+        <ul class="links">
+          <li><a href="https://github.com/zhu-e" target="_blank" rel="noopener">GitHub</a></li>
+          <li><a href="https://www.linkedin.com/in/edwardzhu1/" target="_blank" rel="noopener">LinkedIn</a></li>
+          <li><a href="https://leetcode.com/u/3dd13zhu/" target="_blank" rel="noopener">LeetCode</a></li>
+          <li><a href="assets/resume.pdf" target="_blank" rel="noopener">Resume</a></li>
+        </ul>
+        <p class="fine">© <span id="year">2026</span> Edward Zhu</p>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,1158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Endless Waves</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #efe3c8; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: grab; touch-action: none; }
+  canvas.drag { cursor: grabbing; }
+  body.embed canvas { touch-action: pan-y; }
+  body.embed #hint { display: none; }
+  #hint {
+    position: fixed; left: 16px; bottom: 12px; user-select: none; pointer-events: none;
+    font: 12px/1.4 Georgia, serif; color: #f2e6c9; opacity: .8; text-shadow: 0 0 3px #1a2b45;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hint"></div>
+<script>
+'use strict';
+// Endless Waves: an infinite, procedurally generated ukiyo-e seascape.
+// Everything is deterministic from the seed in the URL hash, so a given #seed is always the same sea.
+
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const hint = document.getElementById('hint');
+// Framed as the homepage banner: vertical scrolling goes to the page, and the page's buttons drive the sea.
+const EMBED = window.self !== window.top;
+if (EMBED) document.body.classList.add('embed');
+let onScreen = true;
+
+const PAL = {
+  paper: '#efe3c8', ink: '#1a2b45',
+  deep: '#1f3e66', mid: '#5a83a6', far: '#8ea9b9', farLow: '#c3d0cd', stripe: '#b6ccd6',
+  foam: '#f7f1e3',
+  fujiTop: '#4f627b', fujiLow: '#b9c3c4', snow: '#f6f1e6', island: '#90a4a7', smoke: '#ddd5c6',
+  boat: '#dcc28c', rower: '#2a4166', head: '#f1e5ca',
+  cloud: '#f6eedd', cloudPink: '#eccfba', cloudEdge: '#c9ad80',
+  seal: '#b5392c',
+  hull: '#5e4433', sail: '#f4ecd9', sailShade: '#d8cbb0', trunk: '#5b4332',
+  landTop: '#4c6a46', landLow: '#a3b47f', sand: '#e4d2a2', pine: '#33523a',
+  rock: '#7d7566', rockLow: '#b3a88e', mtnTop: '#6c8494', mtnLow: '#b7c3c3',
+  wall: '#ece2cb', roof: '#5a616c', thatch: '#a48d5c', torii: '#c4472d',
+};
+const DIR = -1;          // waves break toward the left, as in Hokusai
+const DRIFT = 140;       // auto-scroll speed, in units of U per second
+
+// ---------- seeded randomness ----------
+function mix(a, b, c) {
+  let h = (a ^ Math.imul(b | 0, 0x9E3779B1) ^ Math.imul(c | 0, 0x85EBCA77)) >>> 0;
+  h = Math.imul(h ^ (h >>> 16), 0x7feb352d);
+  h = Math.imul(h ^ (h >>> 15), 0x846ca68b);
+  return (h ^ (h >>> 16)) >>> 0;
+}
+function rng(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function hashStr(s) {
+  let h = 2166136261;
+  for (const ch of s) { h ^= ch.codePointAt(0); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+// 1D gradient noise in roughly [-1, 1]
+function noise1(x, s) {
+  const i = Math.floor(x), f = x - i;
+  const g0 = mix(s, i, 7) / 2147483648 - 1, g1 = mix(s, i + 1, 7) / 2147483648 - 1;
+  const u = f * f * (3 - 2 * f);
+  return 2 * (g0 * f * (1 - u) + g1 * (f - 1) * u);
+}
+
+// ---------- small helpers ----------
+const lerp = (a, b, t) => a + (b - a) * t;
+const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+const smooth = x => { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); };
+function hex2rgb(h) { const n = parseInt(h.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; }
+function mixColor(a, b, t) {
+  const A = hex2rgb(a), B = hex2rgb(b);
+  return `rgb(${A.map((v, i) => Math.round(lerp(v, B[i], t))).join(',')})`;
+}
+function poly(g, pts, close = true) {
+  g.beginPath();
+  g.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) g.lineTo(pts[i][0], pts[i][1]);
+  if (close) g.closePath();
+}
+function addPoly(path, pts) {
+  path.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) path.lineTo(pts[i][0], pts[i][1]);
+  path.closePath();
+}
+function signedArea(p) {
+  let a = 0;
+  for (let i = 0; i < p.length; i++) { const q = p[i], r = p[(i + 1) % p.length]; a += q[0] * r[1] - r[0] * q[1]; }
+  return a / 2;
+}
+// Same winding for every polygon, so nonzero filling of several subpaths gives their union.
+const oriented = p => (signedArea(p) < 0 ? p.slice().reverse() : p);
+
+// The key block (outlines) is printed slightly out of register with the colour blocks.
+let REG = [0.8, 0.5];
+function inkStroke(g, pts, w, close = false) {
+  g.save();
+  g.translate(REG[0], REG[1]);
+  poly(g, pts, close);
+  g.strokeStyle = PAL.ink; g.lineWidth = w; g.lineJoin = 'round'; g.lineCap = 'round';
+  g.stroke();
+  g.restore();
+}
+
+// ---------- world state ----------
+let W, H, DPR, U, HORIZON, CW, CWd, FW, STEP;
+let seedStr, SEED, ROWS = [], PAPER, VIGNETTE;
+const chunkCache = new Map(), featCache = new Map(), waveCache = new Map();
+
+// ---------- the sea surface ----------
+// Each row is a continuous function of world x, so neighbouring chunks always line up.
+function makeRows() {
+  ROWS = [];
+  const N = 8;
+  for (let k = 0; k < N; k++) {
+    const t = k / (N - 1);
+    ROWS.push({
+      k, t,
+      base: HORIZON + (H * 0.97 - HORIZON) * Math.pow(t, 1.45),
+      amp: U * (1.5 + 62 * t * t),
+      freq: 1 / (U * (30 + 230 * t)),
+      s1: mix(SEED, k, 11), s2: mix(SEED, k, 12), s3: mix(SEED, k, 13),
+      top: mixColor(PAL.far, PAL.deep, Math.pow(t, 0.6)),
+      bot: mixColor(PAL.farLow, PAL.mid, Math.pow(t, 0.6)),
+    });
+  }
+  for (let k = 0; k < N; k++) ROWS[k].gap = (k < N - 1 ? ROWS[k + 1].base : H) - ROWS[k].base + ROWS[k].amp * 0.5;
+}
+
+function surf(row, x) {
+  const u = x * row.freq;
+  const th = Math.PI * 2 * u + 5 * noise1(u * 0.17, row.s1) + 1.5 * noise1(u * 0.6, row.s3 ^ 1);
+  // the inner sin skews each swell so its steep face points the way the waves break
+  const v = 0.62 * Math.sin(th + 0.55 * -DIR * Math.sin(th))
+          + 0.28 * Math.sin(1.9 * th + 1.1)
+          + 0.32 * noise1(u * 1.7, row.s2);
+  const w = Math.pow(clamp((v + 1.1) / 2.2, 0, 1), 2.4);       // sharp crests, broad troughs
+  const env = 0.2 + 0.8 * clamp(noise1(u * 0.13, row.s3) * 0.7 + 0.55, 0, 1);
+  return row.base - row.amp * env * w;
+}
+
+// ---------- spirals and claws ----------
+// A tapering spiral band in local y-up space, curling clockwise (over the top toward +x).
+function spiralBand(cx, cy, r0, a0, sweep, thick, shrink, n, taperIn = 0) {
+  const outer = [], inner = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n, a = a0 - sweep * t, r = r0 * (1 - shrink * t);
+    let th = thick * Math.pow(1 - t, 0.8);
+    if (taperIn > 0) th *= Math.min(1, t / taperIn);
+    const c = Math.cos(a), s = Math.sin(a);
+    outer.push([cx + r * c, cy + r * s, a, t]);
+    inner.push([cx + (r - th) * c, cy + (r - th) * s]);
+  }
+  return { outer, inner, poly: outer.concat(inner.slice().reverse()) };
+}
+
+// A foam claw: a tapering finger that leaves p along d and bends clockwise, ever more tightly toward its tip,
+// with smaller fingers branching off its outer side. Children are pushed first so the parent overlaps their roots.
+function claw(out, R, p, d, len, depth) {
+  const n = 16, ds = len / n, w0 = Math.max(len * (0.075 + 0.04 * R()), 0.8 * U);
+  const k0 = (0.4 + 0.8 * R()) / len, k1 = (2.5 + 2 * R()) / (len * len);   // curvature grows along the finger
+  let a = Math.atan2(d[1], d[0]), x = p[0], y = p[1];
+  const spine = [];
+  for (let i = 0; i <= n; i++) {
+    spine.push([x, y, a, i / n]);
+    x += Math.cos(a) * ds; y += Math.sin(a) * ds;
+    a -= (k0 + k1 * i * ds) * ds;
+  }
+  if (depth > 0 && len > 3) {
+    for (let j = 0, m = 1 + Math.floor(R() * 2.5); j < m; j++) {
+      const [qx, qy, qa, t] = spine[Math.round((0.25 + 0.45 * R()) * n)];
+      const off = w0 * Math.pow(1 - t, 0.7) * 0.6, ang = qa + 0.4 + 0.6 * R();   // lean out to the convex side
+      claw(out, R, [qx - Math.sin(qa) * off, qy + Math.cos(qa) * off], [Math.cos(ang), Math.sin(ang)], len * (0.45 + 0.25 * R()), depth - 1);
+    }
+  }
+  const left = [], right = [];
+  for (const [sx, sy, sa, t] of spine) {
+    const w = w0 * (0.85 * Math.pow(1 - t, 0.7) + 0.15), nx = -Math.sin(sa), ny = Math.cos(sa);   // blunt tips stay white
+    left.push([sx + nx * w, sy + ny * w]); right.push([sx - nx * w, sy - ny * w]);
+  }
+  out.push({ pts: left.concat(right.reverse()), tip: Math.round(n * 0.35) });   // tip: where its own outline starts
+}
+// Foam is merged into one white silhouette (stroke everything, then fill everything over it), so claws grow
+// seamlessly out of the lip; then the outer part of each claw gets its own outline so overlapping fingers stay legible.
+function drawFoam(g, shapes, lw) {
+  const all = new Path2D();
+  for (const sh of shapes) addPoly(all, oriented(sh.pts));
+  g.save();
+  g.translate(REG[0], REG[1]);
+  g.strokeStyle = PAL.ink; g.lineWidth = lw * 1.6; g.lineJoin = 'round';
+  g.stroke(all);
+  g.restore();
+  g.fillStyle = PAL.foam;
+  g.fill(all);
+  for (const sh of shapes) if (sh.tip) inkStroke(g, sh.pts.slice(sh.tip, sh.pts.length - sh.tip), lw * 0.7);
+}
+
+// Direction pointing out of a clockwise curl at angle a, leaning forward along it.
+function outwardForward(a, k) {
+  const dx = Math.cos(a) * k + Math.sin(a), dy = Math.sin(a) * k - Math.cos(a), l = Math.hypot(dx, dy);
+  return [dx / l, dy / l];
+}
+
+// ---------- the great wave ----------
+function buildGreatWave(w) {
+  if (waveCache.has(w.seed)) return waveCache.get(w.seed);
+  const R = rng(w.seed);
+  const s = w.h;
+  const r0 = s * (0.4 + R() * 0.08);
+  const thick0 = r0 * (0.52 + R() * 0.1), rin = r0 - thick0;
+  const sx = s * (1.15 + R() * 0.45), sy = s - r0;
+  const sweep = Math.PI * (1.15 + R() * 0.3), shrink = 0.55 + R() * 0.1;
+  const N = 60;
+
+  const curl = spiralBand(sx, sy, r0, Math.PI / 2, sweep, thick0, shrink, N);
+
+  const back = [];
+  for (let i = 0; i <= 40; i++) { const u = i / 40; back.push([u * sx, s * Math.pow(Math.sin(u * Math.PI / 2), 1.1)]); }
+
+  // the hollow under the lip: an arc down the inside, then a concave sweep out to the trough
+  const barrel = [];
+  for (let i = 0; i <= 16; i++) { const a = Math.PI / 2 + (Math.PI / 2) * i / 16; barrel.push([sx + rin * Math.cos(a), sy + rin * Math.sin(a)]); }
+  const fx = sx + r0 * (0.6 + R() * 0.4), cy = sy * 0.2;
+  for (let i = 1; i <= 16; i++) {
+    const t = i / 16;
+    barrel.push([(1 - t) * (1 - t) * (sx - rin) + 2 * (1 - t) * t * (sx - rin) + t * t * fx, (1 - t) * (1 - t) * sy + 2 * (1 - t) * t * cy]);
+  }
+
+  // white foam riding the outer lip, starting a little behind the crest
+  const delta = 0.45;
+  const rF0 = r0 * (1 + shrink * delta / sweep);
+  const foam = spiralBand(sx, sy, rF0, Math.PI / 2 + delta, sweep + delta, r0 * 0.3, 1 - r0 * (1 - shrink) / rF0, N, 0.12);
+
+  const claws = [];
+  for (let t = 0.03 + R() * 0.04; t < 0.9; t += 0.025 + R() * 0.045) {
+    // mostly short, a few long talons mid-lip; each rooted a little inside the foam so it grows out of it
+    const p = foam.outer[Math.round(t * N)], len = r0 * (0.15 + 0.35 * Math.pow(R(), 1.5)) * (0.7 + 0.5 * Math.sin(Math.PI * t));
+    claw(claws, R, [p[0] - Math.cos(p[2]) * len * 0.15, p[1] - Math.sin(p[2]) * len * 0.15], outwardForward(p[2], 0.5 + R()), len, 2);
+  }
+
+  const spray = [];
+  for (let i = 0; i < 34; i++) {
+    const p = curl.outer[Math.round(R() * 0.75 * N)], a = p[2], d = r0 * (0.15 + R() * 0.55);
+    spray.push([p[0] + Math.cos(a) * d + Math.sin(a) * d * 0.6, p[1] + Math.sin(a) * d - Math.cos(a) * d * 0.6, r0 * (0.012 + R() * 0.022)]);
+  }
+
+  const geo = { s, sx, sy, r0, curl, back, barrel, foam, claws, spray };
+  waveCache.set(w.seed, geo);
+  return geo;
+}
+
+function drawGreatWave(g, w, row) {
+  const geo = buildGreatWave(w);
+  const ay = row.base - row.amp * 0.45;
+  const T = p => [w.x + DIR * p[0], ay - p[1]];
+  // the foot of the back and the end of the face settle onto the swells around the wave
+  const settle = (q, k) => { q[1] = lerp(surf(row, q[0]) + 2, q[1], smooth(k)); return q; };
+  const nb = geo.back.length;
+  const backS = geo.back.map((p, i) => settle(T(p), i / (nb - 1) / 0.35));
+  const barrelS = geo.barrel.map((p, i) => settle(T(p), i <= 16 ? 1 : 2 - (i - 16) / 8));
+
+  // body: up the back, down inside the curl, out along the barrel, then home along the sea surface
+  const body = backS.concat(barrelS);
+  const xf = body[body.length - 1][0];
+  for (let i = 0; i <= 24; i++) { const x = lerp(xf, w.x, i / 24); body.push([x, surf(row, x) + 3]); }
+  const curlPts = geo.curl.poly.map(T);
+  const path = new Path2D();
+  addPoly(path, oriented(body));
+  addPoly(path, oriented(curlPts));
+
+  const grd = g.createLinearGradient(0, ay - geo.s, 0, ay);
+  grd.addColorStop(0, PAL.deep); grd.addColorStop(0.55, PAL.mid); grd.addColorStop(1, row.top);
+  g.fillStyle = grd;
+  g.fill(path);
+
+  // pale lines following the shape of the water
+  g.save();
+  g.clip(path);
+  g.strokeStyle = PAL.stripe; g.lineWidth = Math.max(0.8, geo.s * 0.006); g.lineCap = 'round';
+  const R = rng(w.seed ^ 0xabc);
+  for (let k = 1; k <= 13; k++) {
+    const off = k * Math.max(geo.s * 0.048, 2.5 * U), pts = [];   // keep tiny distant waves from filling solid with lines
+    for (const p of backS) pts.push([p[0], p[1] + off]);
+    for (const p of geo.curl.outer) {
+      const r = Math.hypot(p[0] - geo.sx, p[1] - geo.sy) - off;
+      if (r < 0) break;
+      pts.push(T([geo.sx + r * Math.cos(p[2]), geo.sy + r * Math.sin(p[2])]));
+    }
+    g.setLineDash([geo.s * (0.2 + R() * 0.4), geo.s * (0.03 + R() * 0.05)]);
+    g.lineDashOffset = R() * geo.s;
+    g.globalAlpha = 0.85 - k * 0.04;
+    poly(g, pts, false);
+    g.stroke();
+  }
+  g.restore();
+
+  const lw = Math.max(0.8, geo.s * 0.007);
+  const silhouette = backS.concat(geo.curl.outer.map(T), geo.curl.inner.slice().reverse().map(T), barrelS);
+  inkStroke(g, silhouette, lw);
+
+  const foamLw = Math.max(0.5, geo.s * 0.0045);
+  drawFoam(g, [{ pts: geo.foam.poly.map(T) }, ...geo.claws.map(c => ({ pts: c.pts.map(T), tip: c.tip }))], foamLw);
+  for (const [x, y, r] of geo.spray) {
+    const [px, py] = T([x, y]);
+    g.beginPath(); g.arc(px, py, r, 0, Math.PI * 2);
+    g.fillStyle = PAL.foam; g.fill();
+    g.lineWidth = foamLw * 0.7; g.strokeStyle = PAL.ink; g.stroke();
+  }
+}
+
+// ---------- sea rows ----------
+function drawRow(g, row, x0, x1) {
+  const M = 1 / row.freq + 4 * row.amp + 20 * U;
+  const ja = Math.floor((x0 - M) / STEP), jb = Math.ceil((x1 + M) / STEP);
+  const pts = [];
+  for (let j = ja; j <= jb; j++) pts.push([j * STEP, surf(row, j * STEP)]);
+  const xa = pts[0][0], xb = pts[pts.length - 1][0];
+
+  poly(g, pts.concat([[xb, H + 10], [xa, H + 10]]));
+  const grd = g.createLinearGradient(0, row.base - row.amp, 0, row.base + row.gap);
+  grd.addColorStop(0, row.top); grd.addColorStop(1, row.bot);
+  g.fillStyle = grd;
+  g.fill();
+
+  // broken pale lines under the surface, laid out on a world-aligned grid so chunks join seamlessly
+  const nS = 1 + Math.round(row.t * 4), gap = U * (2.2 + row.t * 6.5), cell = U * 46;
+  g.strokeStyle = PAL.stripe; g.lineWidth = U * (0.5 + row.t * 0.8); g.lineCap = 'round';
+  for (let s = 1; s <= nS; s++) {
+    g.globalAlpha = 0.75 * (1 - s / (nS + 1.5));
+    for (let c = Math.floor(xa / cell); c <= Math.floor(xb / cell); c++) {
+      const r = mix(row.s1, c, 100 + s);
+      if ((r & 255) < 60) continue;
+      const a = c * cell + ((r >>> 8) & 255) / 255 * cell * 0.3;
+      const b = (c + 1.15) * cell - ((r >>> 16) & 255) / 255 * cell * 0.3;
+      g.beginPath();
+      for (let x = a; x <= b; x += STEP) { const y = surf(row, x) + s * gap; x === a ? g.moveTo(x, y) : g.lineTo(x, y); }
+      g.stroke();
+    }
+  }
+  g.globalAlpha = 1;
+
+  // the distant sea is just fine horizontal ripples
+  if (row.k <= 2) {
+    const cell2 = U * 22;
+    g.strokeStyle = PAL.ink; g.lineWidth = U * 0.5;
+    for (let c = Math.floor(xa / cell2); c <= Math.floor(xb / cell2); c++) {
+      const r = mix(row.s3, c, 200);
+      if ((r & 255) < 120) continue;
+      const x = c * cell2 + ((r >>> 8) & 255) / 255 * cell2, len = U * (4 + ((r >>> 16) & 255) / 255 * 14);
+      const y = row.base + ((r >>> 24) / 255) * row.gap * 0.7 + U;
+      g.globalAlpha = 0.25 + 0.25 * row.t * 3;
+      g.beginPath(); g.moveTo(x, y); g.lineTo(x + len, y); g.stroke();
+    }
+    g.globalAlpha = 1;
+  }
+
+  inkStroke(g, pts, U * (0.6 + row.t * 1.2));
+
+  // foam claws on the tallest crests
+  if (row.k >= 2) {
+    const win = Math.max(3, Math.round(0.3 / row.freq / STEP));
+    for (let j = win; j < pts.length - win; j++) {
+      const h = row.base - pts[j][1];
+      if (h < row.amp * 0.4) continue;
+      let peak = true;
+      for (let m = j - win; m <= j + win && peak; m++) {
+        const hm = row.base - pts[m][1];
+        if (m !== j && (hm > h || (m < j && hm === h))) peak = false;
+      }
+      if (peak) drawCrest(g, row, pts[j][0], pts[j][1], h);
+    }
+  }
+}
+
+function drawCrest(g, row, px, py, h) {
+  const R = rng(mix(row.s2, Math.round(px / STEP), 31));
+  const len = h * (0.7 + R() * 0.4) + 2 * U;
+  const a = 0.5 + R() * 0.35;
+  const out = [];
+  claw(out, R, [0, -len * 0.05], [Math.cos(a), Math.sin(a)], len, row.t > 0.55 ? 2 : 1);
+  const T = p => [px + DIR * p[0], py - p[1]];
+  // a white cap hugging the crest, mostly on the breaking side, for the claw to grow out of
+  const cap = [], under = [], th = len * 0.14;
+  for (let i = 0; i <= 12; i++) {
+    const u = i / 12, x = px + DIR * len * lerp(0.35, -0.6, u), y = surf(row, x), k = Math.sin(Math.PI * u) * th;
+    cap.push([x, y - k]); under.push([x, y + k * 0.3]);
+  }
+  drawFoam(g, [{ pts: cap.concat(under.reverse()) }, ...out.map(c => ({ pts: c.pts.map(T), tip: c.tip }))], U * (0.4 + row.t * 0.7));
+}
+
+// ---------- boats, mountains, clouds, birds ----------
+function drawBoat(g, b, row) {
+  const R = rng(b.seed), L = b.len, hh = L * 0.075;
+  const yl = surf(row, b.x - L * 0.35), yr = surf(row, b.x + L * 0.35);
+  g.save();
+  g.translate(b.x, (yl + yr) / 2 + hh * 0.2);
+  g.rotate(Math.atan2(yr - yl, L * 0.7));
+  g.scale(b.dir, 1);
+  const bow = u => (u > 0.8 ? Math.pow((u - 0.8) / 0.2, 2) : 0);
+  const gun = u => -hh * (0.1 + 0.25 * Math.pow(2 * u - 1, 2)) - hh * 2.2 * bow(u);
+  const keel = u => hh * 0.9 * Math.sqrt(Math.max(0, 1 - Math.pow(2 * u - 1, 2))) - hh * 2.0 * bow(u);
+  const lw = Math.max(0.6, hh * 0.12);
+
+  // crouched rowers with their oars; the sea drawn afterwards hides whatever is under water
+  const n = Math.max(3, Math.round(L / (hh * 2.6)));
+  g.strokeStyle = PAL.ink;
+  for (let i = 0; i < n; i++) {
+    const u = 0.14 + 0.62 * (i / (n - 1)), x = -L / 2 + u * L, gy = gun(u);
+    const w = hh * 0.85, hb = hh * (1.1 + R() * 0.3);
+    g.lineWidth = lw;
+    g.beginPath(); g.moveTo(x, gy - hb * 0.5); g.lineTo(x - hh * 3, gy + hh * 3.2); g.stroke();
+    g.beginPath(); g.ellipse(x, gy, w, hb, 0, Math.PI, Math.PI * 2); g.closePath();
+    g.fillStyle = PAL.rower; g.fill();
+    g.beginPath(); g.arc(x + w * 0.45, gy - hb * 0.95, hh * 0.42, 0, Math.PI * 2);
+    g.fillStyle = PAL.head; g.fill(); g.lineWidth = lw * 0.7; g.stroke();
+  }
+
+  const hull = [];
+  for (let i = 0; i <= 32; i++) { const u = i / 32; hull.push([-L / 2 + u * L, gun(u)]); }
+  for (let i = 32; i >= 0; i--) { const u = i / 32; hull.push([-L / 2 + u * L, keel(u)]); }
+  poly(g, hull); g.fillStyle = PAL.boat; g.fill();
+  g.lineWidth = lw; g.stroke();
+  const wale = [];
+  for (let i = 0; i <= 28; i++) { const u = i / 32; wale.push([-L / 2 + u * L, gun(u) + hh * 0.4]); }
+  poly(g, wale, false); g.stroke();
+  g.restore();
+}
+
+function drawFuji(g, f) {
+  const R = rng(f.seed);
+  const base = HORIZON + 3, w = f.w, h = w * (0.24 + R() * 0.05), tw = w * (0.08 + R() * 0.03);
+  const L = f.x - w / 2, top = base - h;
+  const pts = [];
+  for (let i = 0; i <= 30; i++) { const u = i / 30; pts.push([L + u * (w / 2 - tw / 2), base - h * Math.pow(u, 1.8)]); }
+  for (let i = 1; i < 6; i++) pts.push([f.x - tw / 2 + tw * i / 6, top + h * 0.015 * (R() + (i % 2))]);
+  for (let i = 30; i >= 0; i--) { const u = i / 30; pts.push([f.x + w / 2 - u * (w / 2 - tw / 2), base - h * Math.pow(u, 1.8)]); }
+
+  const grd = g.createLinearGradient(0, top, 0, base);
+  grd.addColorStop(0, PAL.fujiTop); grd.addColorStop(1, PAL.fujiLow);
+  poly(g, pts); g.fillStyle = grd; g.fill();
+
+  // snow cap with streaks running down the ridges
+  g.save();
+  poly(g, pts); g.clip();
+  const snow = [[L, top - 5], [L + w, top - 5]];
+  for (let x = L + w; x >= L; x -= w / 56) {
+    snow.push([x, R() < 0.35 ? base - h * (0.42 + R() * 0.18) : base - h * (0.68 + R() * 0.06)]);
+  }
+  poly(g, snow); g.fillStyle = PAL.snow; g.fill();
+  inkStroke(g, snow.slice(2), U * 0.5);
+  g.restore();
+  inkStroke(g, pts, U * 0.9, true);
+}
+
+// One-off mountains on the horizon: usually Fuji, but also twin peaks, spires, domes, crags and smoking volcanoes.
+// The kind and its details come from their own random stream, so a Fuji is drawn exactly as before.
+const LONE_KINDS = [['fuji', 0.3], ['twin', 0.15], ['spire', 0.15], ['dome', 0.15], ['crag', 0.12], ['volcano', 0.13]];
+const LONE_TINTS = [PAL.fujiTop, '#5c6584', '#56706c', '#6b6a80'];
+// per kind: width relative to the placed size, height/width range, chance of snow
+const LONE_SHAPES = {
+  twin: [1, 0.22, 0.3, 0.5], spire: [0.6, 0.45, 0.6, 0.6], dome: [0.85, 0.14, 0.2, 0],
+  crag: [0.75, 0.3, 0.4, 0.35], volcano: [0.9, 0.22, 0.28, 0.5],
+};
+
+function drawLoneMountain(g, f) {
+  const T = rng(mix(f.seed, 0, 3));
+  let pick = T(), kind = 'fuji';
+  for (const [k, p] of LONE_KINDS) { if (pick < p) { kind = k; break; } pick -= p; }
+  if (kind === 'fuji') return drawFuji(g, f);
+
+  const [ws, h0, h1, snowChance] = LONE_SHAPES[kind];
+  const w = f.w * ws, h = w * lerp(h0, h1, T()), base = HORIZON + 3, top = base - h, L = f.x - w / 2;
+  const apex = (T() - 0.5) * 0.3, second = 0.8 + 0.15 * T(), s = mix(f.seed, 0, 4);
+  // height in 0..1 at u in -1..1 across the mountain; d is distance from the (off-centre) summit
+  const profile = u => {
+    const d = u < apex ? (apex - u) / (1 + apex) : (u - apex) / (1 - apex);
+    const bump = (c, r) => Math.max(0, 1 - Math.abs(u - c) / r);
+    switch (kind) {
+      case 'twin': return Math.max(Math.pow(bump(-0.3, 0.75), 1.6), second * Math.pow(bump(0.28, 0.72), 1.6));
+      case 'spire': return Math.max(Math.pow(1 - d, 2.2), 0.42 * Math.pow(bump(apex + (apex < 0 ? 0.4 : -0.4), 0.55), 1.5));
+      case 'dome': return Math.pow(Math.cos(d * Math.PI / 2), 1.3);
+      case 'crag': return Math.pow(1 - d, 1.2) * (0.72 + 0.28 * (1 - Math.abs(noise1(u * 5, s)))) * (1 - 0.12 * Math.abs(noise1(u * 17, s ^ 1)));
+      case 'volcano': return Math.pow(clamp((1 - d) / 0.9, 0, 1), 1.5) - (d < 0.1 ? 0.04 * (1 - d / 0.1) : 0);   // crater notch
+    }
+  };
+  const pts = [];
+  for (let i = 0; i <= 64; i++) { const u = -1 + 2 * i / 64; pts.push([f.x + u * w / 2, base - h * profile(u)]); }
+
+  const grd = g.createLinearGradient(0, top, 0, base);
+  grd.addColorStop(0, LONE_TINTS[Math.floor(T() * LONE_TINTS.length)]); grd.addColorStop(1, PAL.fujiLow);
+  poly(g, pts); g.fillStyle = grd; g.fill();
+
+  g.save();
+  poly(g, pts); g.clip();
+  if (kind === 'crag') {   // cracks running down the rock faces
+    g.globalAlpha = 0.6;
+    for (let i = 0; i < 7; i++) {
+      const u = -0.75 + 1.5 * T(), x = f.x + u * w / 2, y = base - h * profile(u), crack = [[x, y]];
+      for (let k = 1; k <= 4; k++) crack.push([x + (T() - 0.5) * w * 0.04, y + h * 0.1 * k]);
+      inkStroke(g, crack, U * 0.5);
+    }
+    g.globalAlpha = 1;
+  }
+  if (T() < snowChance) {   // snow cap with streaks down the gullies
+    const sl = 0.6 + 0.12 * T(), snow = [[L, top - 5], [L + w, top - 5]];
+    for (let x = L + w; x >= L; x -= w / 56) snow.push([x, base - h * (T() < 0.35 ? sl - 0.12 - T() * 0.18 : sl + T() * 0.06)]);
+    poly(g, snow); g.fillStyle = PAL.snow; g.fill();
+    inkStroke(g, snow.slice(2), U * 0.5);
+  }
+  g.restore();
+  inkStroke(g, pts, U * 0.9, true);
+
+  if (kind === 'volcano') {   // a plume of smoke drifting downwind, merged into one outlined shape
+    // puffs step along a path that rises from the crater and bends over downwind, each overlapping the last
+    const plume = new Path2D(), n = 18;
+    let px = f.x + apex * w / 2, py = top + h * 0.06;
+    for (let i = 0; i < n; i++) {
+      const t = i / (n - 1), r = h * (0.05 + 0.12 * t), a = -Math.PI / 2 + (Math.PI / 2) * 0.85 * smooth(t * 1.4);
+      px += DIR * Math.cos(a) * r * 0.8; py += Math.sin(a) * r * 0.8;
+      const qx = px + (T() - 0.5) * r * 0.6, qy = py + (T() - 0.5) * r * 0.5, rx = r * (1.2 + 0.4 * T());
+      plume.moveTo(qx + rx, qy); plume.ellipse(qx, qy, rx, r, 0, 0, Math.PI * 2);
+    }
+    g.save(); g.translate(REG[0], REG[1]); g.strokeStyle = PAL.ink; g.lineWidth = U * 1.4; g.stroke(plume); g.restore();
+    g.fillStyle = PAL.smoke; g.fill(plume);
+  }
+}
+
+function drawIsland(g, f) {
+  const base = HORIZON + 3, pts = [];
+  for (let i = 0; i <= 40; i++) {
+    const u = i / 40;
+    pts.push([f.x - f.w / 2 + u * f.w, base - f.h * Math.pow(Math.sin(Math.PI * u), 0.7) * (0.75 + 0.25 * noise1(u * 6, f.seed))]);
+  }
+  poly(g, pts); g.fillStyle = PAL.island; g.fill();
+  inkStroke(g, pts, U * 0.6, true);
+}
+
+// kasumi: stacked bands of mist with rounded ends
+function drawKasumi(g, c) {
+  const R = rng(c.seed), path = new Path2D();
+  for (let j = 0; j < c.n; j++) {
+    const h = c.h * (0.8 + R() * 0.4), r = h / 2;
+    const l = Math.max(h * 2.5, c.len * (0.45 + R() * 0.55));
+    const x = c.x + (R() - 0.5) * c.len * 0.5 - l / 2, y = c.y + j * c.h * 0.8;
+    path.moveTo(x + r, y - r);
+    path.lineTo(x + l - r, y - r);
+    path.arc(x + l - r, y, r, -Math.PI / 2, Math.PI / 2);
+    path.lineTo(x + r, y + r);
+    path.arc(x + r, y, r, Math.PI / 2, Math.PI * 1.5);
+    path.closePath();
+  }
+  // stroke first, then fill over it, so only the outer outline of the merged bands survives
+  g.save(); g.translate(REG[0], REG[1]);
+  g.strokeStyle = PAL.cloudEdge; g.lineWidth = U * 2.2; g.stroke(path);
+  g.restore();
+  g.fillStyle = c.pink ? PAL.cloudPink : PAL.cloud;
+  g.fill(path);
+}
+
+function drawBirds(g, b) {
+  const R = rng(b.seed);
+  g.strokeStyle = PAL.ink; g.lineWidth = U * 0.9; g.lineCap = 'round';
+  for (let i = 0; i < b.n; i++) {
+    const x = b.x + i * U * 14 + R() * U * 8, y = b.y + i * U * 4 * (R() - 0.3), sz = U * (3 + R() * 2);
+    g.beginPath();
+    g.moveTo(x - sz, y - sz * 0.3);
+    g.quadraticCurveTo(x - sz * 0.4, y - sz * 0.7, x, y);
+    g.quadraticCurveTo(x + sz * 0.4, y - sz * 0.7, x + sz, y - sz * 0.3);
+    g.stroke();
+  }
+}
+
+// ---------- cargo ships ----------
+function drawShip(g, s, row) {
+  const R = rng(s.seed), L = s.len, hh = L * 0.11, lw = Math.max(0.6, L * 0.008);
+  const yl = surf(row, s.x - L * 0.35), yr = surf(row, s.x + L * 0.35);
+  g.save();
+  g.translate(s.x, (yl + yr) / 2 + hh * 0.35);
+  g.rotate(Math.atan2(yr - yl, L * 0.7) * 0.6);
+  g.scale(s.dir, 1);    // bow toward +x in local space
+  const X = u => -L / 2 + u * L;
+  // high stern at u = 0, long raked stem at u = 1
+  const gun = u => -hh * (0.55 + 0.9 * Math.pow(Math.max(0, 0.22 - u) / 0.22, 1.5) + 0.8 * Math.pow(Math.max(0, u - 0.82) / 0.18, 2));
+  const keel = u => hh * 0.55 * Math.sqrt(Math.max(0, 1 - Math.pow(2 * u - 1, 4))) - hh * 1.2 * Math.pow(Math.max(0, u - 0.85) / 0.15, 2);
+
+  // stays, mast, and the big square sail of panelled cloth swelling in the wind
+  const xm = X(0.52), deck = gun(0.52), mastTop = deck - L * 0.85;
+  g.strokeStyle = PAL.ink; g.lineWidth = lw * 0.6; g.globalAlpha = 0.8;
+  g.beginPath(); g.moveTo(X(1), gun(1)); g.lineTo(xm, mastTop); g.lineTo(X(0.02), gun(0.02)); g.stroke();
+  g.globalAlpha = 1;
+  g.fillStyle = PAL.trunk; g.fillRect(xm - lw * 1.2, mastTop, lw * 2.4, deck - mastTop);
+  const sw = L * (0.42 + 0.1 * R()), ys = mastTop + L * 0.07, yb = deck - hh * 0.9, bul = sw * 0.12;
+  const edgeX = (side, v) => xm + side * sw / 2 + bul * Math.sin(Math.PI * v) + bul * 0.5 * v;
+  const foot = u => yb + bul * 0.6 * Math.sin(Math.PI * u);
+  const sail = [];
+  for (let i = 0; i <= 12; i++) sail.push([edgeX(1, i / 12), lerp(ys, yb, i / 12)]);
+  for (let i = 1; i < 12; i++) { const u = 1 - i / 12; sail.push([lerp(edgeX(-1, 1), edgeX(1, 1), u), foot(u)]); }
+  for (let i = 12; i >= 0; i--) sail.push([edgeX(-1, i / 12), lerp(ys, yb, i / 12)]);
+  const sg = g.createLinearGradient(xm - sw / 2, 0, xm + sw / 2, 0);
+  sg.addColorStop(0, PAL.sailShade); sg.addColorStop(0.6, PAL.sail); sg.addColorStop(1, PAL.sail);
+  poly(g, sail); g.fillStyle = sg; g.fill();
+  g.save();
+  g.globalAlpha = 0.55;
+  for (let i = 1, n = 6 + Math.floor(R() * 4); i < n; i++) {
+    const u = i / n, seam = [];
+    for (let j = 0; j <= 8; j++) { const v = j / 8; seam.push([lerp(edgeX(-1, v), edgeX(1, v), u), lerp(ys, foot(u), v)]); }
+    inkStroke(g, seam, lw * 0.5);
+  }
+  g.restore();
+  inkStroke(g, sail, lw, true);
+  g.strokeStyle = PAL.ink; g.lineWidth = lw * 2;
+  g.beginPath(); g.moveTo(xm - sw * 0.58, ys); g.lineTo(xm + sw * 0.58, ys); g.stroke();
+
+  // deckhouse at the stern, then the hull in front of it
+  const house = [[X(0.05), gun(0.05) + hh * 0.2], [X(0.25), gun(0.25) + hh * 0.2], [X(0.25), gun(0.25) - hh * 0.7], [X(0.05), gun(0.05) - hh * 0.7]];
+  poly(g, house); g.fillStyle = PAL.wall; g.fill(); inkStroke(g, house, lw, true);
+  const hull = [], wale = [];
+  for (let i = 0; i <= 32; i++) { hull.push([X(i / 32), gun(i / 32)]); wale.push([X(i / 32), gun(i / 32)]); }
+  for (let i = 32; i >= 0; i--) { hull.push([X(i / 32), keel(i / 32)]); wale.push([X(i / 32), gun(i / 32) + hh * 0.32]); }
+  poly(g, hull); g.fillStyle = PAL.hull; g.fill();
+  poly(g, wale); g.fillStyle = PAL.boat; g.fill();
+  inkStroke(g, hull, lw, true);
+  g.restore();
+}
+
+// ---------- plovers (chidori) skimming the swells ----------
+function drawPlovers(g, f, row) {
+  const R = rng(f.seed), sc = 0.55 + 0.6 * row.t;
+  const y0 = row.base - row.amp - f.alt, rise = (R() - 0.5) * U * 40, ph = R() * Math.PI * 2;
+  for (let i = 0; i < f.n; i++) {
+    const u = i / f.n;
+    const x = f.x + u * f.spread + (R() - 0.5) * f.spread * 0.12;
+    const y = y0 + (Math.sin(i * 0.6 + ph) * 10 + (R() - 0.5) * 10) * U * sc - u * rise;
+    drawPlover(g, x, y, U * (6 + R() * 3) * sc, R() * 1.5 - 0.5);
+  }
+}
+
+function drawPlover(g, x, y, sz, flap) {
+  const f = DIR, lw = Math.max(0.5, sz * 0.12);
+  // two swept wings, raised or lowered by `flap`
+  g.fillStyle = PAL.ink;
+  for (const side of [-1, 1]) {
+    g.beginPath();
+    g.moveTo(x - side * sz * 0.1, y - sz * 0.05);
+    g.quadraticCurveTo(x - side * sz * 0.55, y - sz * (0.15 + 0.6 * flap), x - side * sz * 1.05 - f * sz * 0.25, y - sz * flap * 0.9);
+    g.quadraticCurveTo(x - side * sz * 0.45, y + sz * (0.12 - 0.05 * flap), x + side * sz * 0.1, y + sz * 0.12);
+    g.closePath();
+    g.fill();
+  }
+  // round white body and head, beak pointing the way they fly
+  g.beginPath();
+  g.ellipse(x, y + sz * 0.08, sz * 0.42, sz * 0.2, 0, 0, Math.PI * 2);
+  g.moveTo(x + f * sz * 0.5 + sz * 0.15, y - sz * 0.02);
+  g.arc(x + f * sz * 0.5, y - sz * 0.02, sz * 0.15, 0, Math.PI * 2);
+  g.fillStyle = PAL.foam; g.fill();
+  g.strokeStyle = PAL.ink; g.lineWidth = lw; g.stroke();
+  g.beginPath(); g.moveTo(x + f * sz * 0.63, y - sz * 0.02); g.lineTo(x + f * sz * 0.85, y + sz * 0.02); g.stroke();
+}
+
+// ---------- coastline ----------
+// How much land there is at x (0 = open sea, 1 = full coast), and the screen y of the ridge and the top of the beach.
+function landGeo(seg, x) {
+  const c = smooth((x - seg.xs) / seg.rampL) * smooth((seg.xe - x) / seg.rampR);
+  const n = 0.6 * noise1(x / (520 * U), seg.seed) + 0.3 * noise1(x / (170 * U), seg.seed ^ 1) + 0.1 * noise1(x / (55 * U), seg.seed ^ 2);
+  const hill = clamp(0.55 + 0.6 * n, 0.12, 1);
+  const sand = seg.shoreY - U * (3 + 7 * (0.5 + 0.5 * noise1(x / (260 * U), seg.seed ^ 3))) * c;
+  return { c, sand, top: sand - Math.pow(c, 0.8) * seg.hMax * hill };
+}
+
+// distant blue ranges behind a coast, standing on the horizon
+function drawMountains(g, seg, x0, x1) {
+  if (!seg.mtn) return;
+  const pad = 300 * U, a = Math.max(seg.xs - pad, x0 - 60 * U), b = Math.min(seg.xe + pad, x1 + 60 * U);
+  if (a >= b) return;
+  const st = STEP * 2, pts = [];
+  for (let j = Math.floor(a / st); j <= Math.ceil(b / st); j++) {
+    const x = j * st;
+    const c = smooth((x - seg.xs + pad) / (seg.rampL + pad)) * smooth((seg.xe + pad - x) / (seg.rampR + pad));
+    const ridge = 0.3 + 0.7 * Math.pow(1 - Math.abs(noise1(x / (280 * U), seg.seed ^ 5)), 2) * (0.7 + 0.3 * noise1(x / (90 * U), seg.seed ^ 6));
+    pts.push([x, HORIZON + 2 - c * seg.mtn * ridge]);
+  }
+  const xa = pts[0][0], xb = pts[pts.length - 1][0];
+  const grd = g.createLinearGradient(0, HORIZON - seg.mtn, 0, HORIZON);
+  grd.addColorStop(0, PAL.mtnTop); grd.addColorStop(1, PAL.mtnLow);
+  poly(g, pts.concat([[xb, HORIZON + 4], [xa, HORIZON + 4]]));
+  g.fillStyle = grd; g.fill();
+  inkStroke(g, pts, U * 0.7);
+}
+
+function drawLand(g, seg, x0, x1) {
+  const a = Math.max(seg.xs, x0 - 100 * U), b = Math.min(seg.xe, x1 + 100 * U);
+  if (a >= b) return;
+  const st = STEP * 2, top = [], sand = [];
+  for (let j = Math.floor(a / st); j <= Math.ceil(b / st); j++) {
+    const l = landGeo(seg, j * st);
+    top.push([j * st, l.top]); sand.push([j * st, l.sand]);
+  }
+  const bottom = [[top[top.length - 1][0], seg.bottom], [top[0][0], seg.bottom]];
+  const land = top.concat(bottom);
+
+  const grd = g.createLinearGradient(0, seg.shoreY - seg.hMax, 0, seg.shoreY);
+  grd.addColorStop(0, PAL.landTop); grd.addColorStop(1, PAL.landLow);
+  poly(g, land); g.fillStyle = grd; g.fill();
+  g.save();
+  poly(g, land); g.clip();
+  // darker gradation hugging the ridge line
+  g.strokeStyle = PAL.landTop; g.lineWidth = 3 * U;
+  for (let i = 0; i < 6; i++) {
+    g.globalAlpha = 0.16 * (1 - i / 6);
+    poly(g, top.map(p => [p[0], p[1] + i * 2.2 * U]), false); g.stroke();
+  }
+  // stippled trees on the slopes
+  const cell = 9 * U;
+  g.fillStyle = PAL.pine; g.globalAlpha = 0.5;
+  for (let c = Math.floor(a / cell); c <= Math.ceil(b / cell); c++) {
+    const r = mix(seg.seed, c, 300);
+    if ((r & 255) < 100) continue;
+    const x = (c + ((r >>> 8) & 255) / 255) * cell, l = landGeo(seg, x);
+    const y = lerp(l.top + 5 * U, l.sand - 3 * U, ((r >>> 16) & 255) / 255);
+    if (l.c < 0.25 || y > l.sand - 3 * U) continue;
+    g.beginPath(); g.ellipse(x, y, 2.6 * U, 1.5 * U, 0, 0, Math.PI * 2); g.fill();
+  }
+  g.restore();
+
+  poly(g, sand.concat(bottom)); g.fillStyle = PAL.sand; g.fill();
+  inkStroke(g, sand, U * 0.5);
+  inkStroke(g, top, U * 0.9);
+
+  if (seg.village) drawVillage(g, seg, seg.village);
+
+  // pines along the ridge
+  const pc = 34 * U;
+  for (let c = Math.floor(a / pc); c <= Math.ceil(b / pc); c++) {
+    const r = mix(seg.seed, c, 400);
+    if ((r & 255) < 150) continue;
+    const x = (c + ((r >>> 8) & 255) / 255) * pc, l = landGeo(seg, x);
+    if (l.c < 0.35) continue;
+    drawPine(g, x, l.top + 3 * U, U * (12 + 20 * ((r >>> 16) & 255) / 255) * (0.6 + 0.4 * l.c), rng(r));
+  }
+
+  seg.rocks.forEach((r, i) => {
+    const pts = drawRock(g, r, seg.bottom);
+    if (i === 0 && seg.rockPine) {   // a lone pine clinging to the tallest headland rock
+      const peak = pts.reduce((p, q) => (q[1] < p[1] ? q : p));
+      drawPine(g, peak[0], peak[1] + 2 * U, U * (16 + 10 * rng(r.seed)()), rng(r.seed ^ 7));
+    }
+  });
+}
+
+function drawRock(g, r, base) {
+  const R = rng(r.seed), n = 7, pts = [[r.x - r.w / 2, base]];
+  for (let i = 0; i <= n; i++) {
+    const u = i / n;
+    pts.push([r.x - r.w / 2 + u * r.w + (R() - 0.5) * r.w * 0.08, base - r.h * Math.pow(Math.sin(Math.PI * (0.06 + 0.88 * u)), 0.5) * (0.75 + 0.25 * R())]);
+  }
+  pts.push([r.x + r.w / 2, base]);
+  const grd = g.createLinearGradient(0, base - r.h, 0, base);
+  grd.addColorStop(0, PAL.rock); grd.addColorStop(1, PAL.rockLow);
+  poly(g, pts); g.fillStyle = grd; g.fill();
+  // cracks running down the face
+  g.save();
+  poly(g, pts); g.clip();
+  for (let i = 0, m = 2 + Math.floor(R() * 3); i < m; i++) {
+    const p = pts[2 + Math.floor(R() * (n - 2))], crack = [p];
+    for (let s = 1; s <= 4; s++) crack.push([p[0] + (R() - 0.5) * r.w * 0.15, p[1] + r.h * 0.18 * s]);
+    inkStroke(g, crack, U * 0.5);
+  }
+  g.restore();
+  inkStroke(g, pts, U * 0.8, true);
+  return pts;
+}
+
+// ukiyo-e pine: a leaning tapered trunk carrying flat, layered pads of needles
+function drawPine(g, x, y, h, R) {
+  const tx = x + (R() - 0.5) * 0.7 * h, ty = y - h, cx = x + (R() - 0.5) * h * 0.35, cy = y - h * 0.5;
+  const at = s => [(1 - s) * (1 - s) * x + 2 * (1 - s) * s * cx + s * s * tx, (1 - s) * (1 - s) * y + 2 * (1 - s) * s * cy + s * s * ty];
+  const lw = Math.max(0.5, h * 0.025);
+  const left = [], right = [];
+  for (let i = 0; i <= 10; i++) { const s = i / 10, p = at(s), w = h * (0.06 - 0.035 * s); left.push([p[0] - w, p[1]]); right.push([p[0] + w, p[1]]); }
+  const trunk = left.concat(right.reverse());
+  poly(g, trunk); g.fillStyle = PAL.trunk; g.fill(); inkStroke(g, trunk, lw, true);
+
+  const pads = new Path2D(), tiers = 2 + Math.floor(R() * 3);
+  g.strokeStyle = PAL.ink; g.lineWidth = lw;
+  for (let i = 0; i < tiers; i++) {
+    const s = 0.5 + 0.5 * i / (tiers - 1), p = at(s);
+    const pw = h * (0.5 - 0.22 * s + 0.2 * R()), ph = pw * 0.26, px = p[0] + (R() - 0.5) * h * 0.4, py = p[1] - ph * 0.3;
+    g.beginPath(); g.moveTo(p[0], p[1]); g.lineTo(px, py); g.stroke();   // branch
+    for (let j = 0, n = 3 + Math.floor(R() * 2); j < n; j++) {
+      const ex = px + (j - (n - 1) / 2) * pw * 0.32, ey = py - Math.sin(Math.PI * (j + 0.5) / n) * ph * 0.4;
+      const rx = pw * (0.24 + 0.08 * R()), ry = ph * (0.55 + 0.2 * R());
+      pads.moveTo(ex + rx, ey); pads.ellipse(ex, ey, rx, ry, 0, 0, Math.PI * 2);
+    }
+  }
+  // stroke then fill, so only the outline of the merged pads survives
+  g.save(); g.translate(REG[0], REG[1]); g.lineWidth = lw * 2; g.stroke(pads); g.restore();
+  g.fillStyle = PAL.pine; g.fill(pads);
+}
+
+function drawVillage(g, seg, v) {
+  const R = rng(v.seed), houses = [];
+  for (let i = 0; i < v.n; i++) {
+    const x = v.x + (R() - 0.5) * v.spread;
+    houses.push({ x, y: landGeo(seg, x).sand - U * R() * 10, w: U * (10 + R() * 9), thatch: R() < 0.4, d: R() - 0.5 });
+  }
+  houses.sort((a, b) => a.y - b.y);   // back rows first
+  const lw = U * 0.6;
+  for (const { x, y, w, thatch, d } of houses) {
+    const hw = w * 0.42, hr = w * 0.45, ov = w * 0.12;
+    const wall = [[x - w / 2, y], [x + w / 2, y], [x + w / 2, y - hw], [x - w / 2, y - hw]];
+    poly(g, wall); g.fillStyle = PAL.wall; g.fill(); inkStroke(g, wall, lw, true);
+    g.fillStyle = PAL.trunk; g.fillRect(x - w * 0.11 + w * 0.4 * d, y - hw * 0.75, w * 0.22, hw * 0.75);
+    const roof = [[x - w / 2 - ov, y - hw], [x + w / 2 + ov, y - hw], [x + w * 0.28, y - hw - hr], [x - w * 0.28, y - hw - hr]];
+    poly(g, roof); g.fillStyle = thatch ? PAL.thatch : PAL.roof; g.fill(); inkStroke(g, roof, lw, true);
+  }
+}
+
+// a vermilion torii standing in the surf
+function drawTorii(g, t, row) {
+  const h = t.h, cx = t.x, base = row.base + row.amp * 0.3, top = base - h, lw = Math.max(0.6, h * 0.02);
+  const kt = h * 0.09, pw0 = h * 0.075, pw1 = h * 0.06, sp = h * 0.36, ny = top + h * 0.3, nh = h * 0.055;
+  const parts = [];
+  for (const s of [-1, 1]) parts.push([[cx + s * sp * 1.08 - pw0 / 2, base], [cx + s * sp * 1.08 + pw0 / 2, base], [cx + s * sp + pw1 / 2, top + kt * 0.9], [cx + s * sp - pw1 / 2, top + kt * 0.9]]);
+  parts.push([[cx - h * 0.03, top + kt], [cx + h * 0.03, top + kt], [cx + h * 0.03, ny], [cx - h * 0.03, ny]]);
+  parts.push([[cx - h * 0.52, ny], [cx + h * 0.52, ny], [cx + h * 0.52, ny + nh], [cx - h * 0.52, ny + nh]]);
+  // kasagi, the top beam with upswept ends, capped in black
+  const edge = [], kw = h * 0.68;
+  for (let i = 0; i <= 20; i++) { const u = i / 20; edge.push([cx - kw + 2 * kw * u, top - h * 0.07 * Math.pow(2 * u - 1, 4)]); }
+  parts.push(edge.concat(edge.map(p => [p[0], p[1] + kt]).reverse()));
+  for (const p of parts) { poly(g, p); g.fillStyle = PAL.torii; g.fill(); inkStroke(g, p, lw, true); }
+  const cap = edge.concat(edge.map(p => [p[0], p[1] + kt * 0.35]).reverse());
+  poly(g, cap); g.fillStyle = PAL.ink; g.fill();
+}
+
+// ---------- feature placement ----------
+// Features live in fixed-width world cells, each seeded independently.
+function cellFeatures(j) {
+  if (featCache.has(j)) return featCache.get(j);
+  const R = rng(mix(SEED, j, 1)), x0 = j * FW, N = ROWS.length;
+  const f = { clouds: [], mist: [], peaks: [], islands: [], birds: [], boats: [] };
+  if (R() < 0.75) f.clouds.push({ x: x0 + R() * FW, y: HORIZON * (0.12 + R() * 0.55), len: U * (140 + R() * 260), h: U * (10 + R() * 9), n: 2 + Math.floor(R() * 3), pink: R() < 0.35, seed: mix(SEED, j, 2) });
+  if (R() < 0.6) f.mist.push({ x: x0 + R() * FW, y: HORIZON - U * (4 + R() * 14), len: U * (160 + R() * 240), h: U * (6 + R() * 5), n: 1 + Math.floor(R() * 2), pink: false, seed: mix(SEED, j, 3) });
+  if (R() < 0.2) f.peaks.push({ x: x0 + R() * FW, w: U * (240 + R() * 200), seed: mix(SEED, j, 4) });
+  else if (R() < 0.4) f.islands.push({ x: x0 + R() * FW, w: U * (80 + R() * 220), h: U * (6 + R() * 16), seed: mix(SEED, j, 5) });
+  if (R() < 0.18) f.birds.push({ x: x0 + R() * FW, y: HORIZON * (0.2 + R() * 0.5), n: 3 + Math.floor(R() * 6), seed: mix(SEED, j, 6) });
+  if (R() < 0.4) {
+    const k = 3 + Math.floor(R() * (N - 4));
+    f.boats.push({ x: x0 + R() * FW, k, len: U * (100 + R() * 80) * (0.35 + 0.75 * ROWS[k].t), dir: R() < 0.5 ? -1 : 1, seed: mix(SEED, j, 7) });
+  }
+  if (featCache.size > 4000) featCache.clear();
+  featCache.set(j, f);
+  return f;
+}
+
+// One candidate per grid slot of width `spacing`, nudged by up to ±jitter·spacing. Compared with independent
+// coin flips this spreads things out evenly on average, without long empty stretches or pile-ups;
+// an occasional empty slot (occupancy < 1) keeps the rhythm from feeling mechanical.
+function slots(tag, spacing, occupancy, x0, x1, reach, jitter = 0.3, phase = 0) {
+  const out = [];
+  for (let m = Math.floor((x0 - reach - phase) / spacing) - 1; m <= Math.ceil((x1 + reach - phase) / spacing); m++) {
+    const R = rng(mix(SEED, m, tag));
+    if (R() > occupancy) continue;
+    out.push({ m, R, x: phase + (m + 0.5 + (R() - 0.5) * 2 * jitter) * spacing });
+  }
+  return out;
+}
+
+// Great waves: nearer rows have bigger waves and wider spacing, and each row's grid is offset
+// so waves on different rows don't line up in columns.
+function waveSlots(x0, x1) {
+  const out = [];
+  for (let k = 2; k < ROWS.length; k++) {
+    const t = ROWS[k].t, S = U * (1000 + 1500 * t);
+    for (const { m, R, x } of slots(20 + k, S, 0.92, x0, x1, 800 * U, 0.3, ((k * 0.618) % 1) * S)) {
+      out.push({ x, k, h: U * (10 + 250 * t * t * t) * (0.75 + 0.5 * R()), seed: mix(SEED, m, 40 + k) });
+    }
+  }
+  return out;
+}
+
+function shipSlots(x0, x1) {
+  return slots(60, 3200 * U, 0.7, x0, x1, 800 * U, 0.35).map(({ m, R, x }) => {
+    const k = 2 + Math.floor(R() * 4);
+    return { x, k, len: U * (25 + 170 * Math.pow(ROWS[k].t, 1.5)) * (0.85 + 0.3 * R()), dir: R() < 0.8 ? DIR : -DIR, seed: mix(SEED, m, 61) };
+  });
+}
+
+function ploverSlots(x0, x1) {
+  return slots(70, 2600 * U, 0.65, x0, x1, 800 * U, 0.35).map(({ m, R, x }) => ({
+    x, k: 3 + Math.floor(R() * 4), n: 7 + Math.floor(R() * 14), spread: U * (120 + R() * 220), alt: U * (15 + R() * 50), seed: mix(SEED, m, 71),
+  }));
+}
+
+// Coastline stretches: land rising behind sea row S, its foot hidden by row S + 1.
+function coastSegments(x0, x1) {
+  const out = [];
+  for (const { m, R, x } of slots(80, 5000 * U, 0.75, x0, x1, 5000 * U, 0.15)) {
+    const len = U * (1400 + R() * 1400), S = R() < 0.6 ? 2 : 3, next = ROWS[S + 1];
+    const seg = {
+      xs: x - len / 2, xe: x + len / 2, rampL: U * (200 + R() * 300), rampR: U * (200 + R() * 300),
+      S, shoreY: next.base - next.amp * 0.9, bottom: next.base + 3 * U,
+      hMax: U * (80 + R() * 110), mtn: R() < 0.7 ? U * (120 + R() * 120) : 0, seed: mix(SEED, m, 81),
+    };
+    if (seg.xe < x0 - 800 * U || seg.xs > x1 + 800 * U) continue;
+    const below = seg.bottom - seg.shoreY;
+    // rocky headlands where the land runs down into the sea at both ends, plus a few boulders along the shore
+    seg.rocks = [];
+    for (const [from, ramp, sgn] of [[seg.xs, seg.rampL, 1], [seg.xe, seg.rampR, -1]]) {
+      for (let i = 0, n = 3 + Math.floor(R() * 3); i < n; i++) {
+        const rx = from + sgn * ramp * (0.1 + 0.85 * R()), above = seg.shoreY - landGeo(seg, rx).top;
+        const h = above * (0.6 + 0.5 * R()) + U * (6 + 8 * R());
+        seg.rocks.push({ x: rx, w: Math.max(U * (18 + 32 * R()), h * 0.7), h: h + below, seed: mix(seg.seed, i, sgn + 90) });
+      }
+    }
+    for (let i = 0, n = 2 + Math.floor(R() * 4); i < n; i++) {
+      seg.rocks.push({ x: lerp(seg.xs, seg.xe, R()), w: U * (10 + 16 * R()), h: U * (5 + 9 * R()) + below, seed: mix(seg.seed, i, 95) });
+    }
+    seg.rocks.sort((a, b) => b.h - a.h);   // tallest drawn first, at the back
+    seg.rockPine = R() < 0.6;
+    const inner = u => lerp(seg.xs + seg.rampL, seg.xe - seg.rampR, u);
+    seg.village = R() < 0.55 ? { x: inner(0.2 + 0.6 * R()), n: 4 + Math.floor(R() * 7), spread: U * (50 + R() * 90), seed: mix(seg.seed, 0, 96) } : null;
+    if (R() < 0.4) {
+      const k = S + 1 + (R() < 0.35 ? 1 : 0);
+      seg.torii = { x: inner(R()), k, h: U * (34 + 18 * R()) * (0.6 + 0.5 * ROWS[k].t) };
+    }
+    out.push(seg);
+  }
+  return out;
+}
+
+function gatherFeatures(x0, x1) {
+  const all = { clouds: [], mist: [], peaks: [], islands: [], birds: [], boats: [] };
+  const reach = 800 * U;
+  for (let j = Math.floor((x0 - reach) / FW); j <= Math.floor((x1 + reach) / FW); j++) {
+    const f = cellFeatures(j);
+    for (const key in all) all[key].push(...f[key]);
+  }
+  all.waves = waveSlots(x0, x1);
+  all.ships = shipSlots(x0, x1);
+  all.plovers = ploverSlots(x0, x1);
+  all.coast = coastSegments(x0, x1);
+  all.torii = all.coast.filter(c => c.torii).map(c => c.torii);
+  return all;
+}
+
+// ---------- chunk rendering ----------
+function renderChunk(i) {
+  const c = document.createElement('canvas');
+  c.width = CWd; c.height = Math.ceil(H * DPR);
+  const g = c.getContext('2d');
+  const x0 = i * CW, x1 = x0 + CW;
+  g.setTransform(DPR, 0, 0, DPR, -x0 * DPR, 0);
+
+  const sky = g.createLinearGradient(0, 0, 0, HORIZON);
+  sky.addColorStop(0, '#29466b'); sky.addColorStop(0.18, '#5b7898');
+  sky.addColorStop(0.42, PAL.paper); sky.addColorStop(1, '#f1e4c6');
+  g.fillStyle = sky; g.fillRect(x0, 0, CW, HORIZON + 4);
+  g.fillStyle = PAL.paper; g.fillRect(x0, HORIZON, CW, H - HORIZON);
+
+  const F = gatherFeatures(x0, x1);
+  F.clouds.forEach(f => drawKasumi(g, f));
+  F.birds.forEach(f => drawBirds(g, f));
+  F.islands.forEach(f => drawIsland(g, f));
+  F.peaks.forEach(f => drawLoneMountain(g, f));
+  F.coast.forEach(c => drawMountains(g, c, x0, x1));
+  F.mist.forEach(f => drawKasumi(g, f));
+  for (const row of ROWS) {
+    // things standing in the water go first, so this row's sea hides whatever is below the surface
+    F.ships.filter(s => s.k === row.k).forEach(s => drawShip(g, s, row));
+    F.boats.filter(b => b.k === row.k).forEach(b => drawBoat(g, b, row));
+    F.torii.filter(t => t.k === row.k).forEach(t => drawTorii(g, t, row));
+    drawRow(g, row, x0, x1);
+    F.waves.filter(w => w.k === row.k).forEach(w => drawGreatWave(g, w, row));
+    F.plovers.filter(p => p.k === row.k).forEach(p => drawPlovers(g, p, row));
+    F.coast.filter(c => c.S === row.k).forEach(c => drawLand(g, c, x0, x1));
+  }
+
+  // paper grain, anchored to the world so it scrolls with the picture
+  g.globalCompositeOperation = 'multiply';
+  g.fillStyle = PAPER;
+  g.fillRect(x0, 0, CW, H);
+  g.globalCompositeOperation = 'source-over';
+  return c;
+}
+
+function getChunk(i) {
+  let c = chunkCache.get(i);
+  if (c) { chunkCache.delete(i); chunkCache.set(i, c); return c; }
+  c = renderChunk(i);
+  chunkCache.set(i, c);
+  const max = Math.ceil(W / CW) + 5;
+  while (chunkCache.size > max) chunkCache.delete(chunkCache.keys().next().value);
+  return c;
+}
+
+function makePaper() {
+  const S = 512, c = document.createElement('canvas');
+  c.width = c.height = S;
+  const g = c.getContext('2d'), R = rng(12345);
+  g.fillStyle = '#fff'; g.fillRect(0, 0, S, S);
+  for (let i = 0; i < 2600; i++) {
+    const x = R() * S, y = R() * S, l = 2 + R() * 10, a = (R() - 0.5) * 0.6;
+    g.strokeStyle = `rgba(120,95,60,${0.04 + R() * 0.08})`; g.lineWidth = 0.5 + R() * 0.7;
+    g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke();
+  }
+  for (let i = 0; i < 5000; i++) { g.fillStyle = `rgba(90,70,40,${R() * 0.12})`; g.fillRect(R() * S, R() * S, 1, 1); }
+  // faint woodgrain from the printing block
+  for (let i = 0; i < 40; i++) {
+    const y0 = R() * S, amp = 1 + R() * 3, ph = R() * 6.28, fr = (1 + Math.floor(R() * 3)) * 2 * Math.PI / S;
+    g.strokeStyle = `rgba(110,90,60,${0.03 + R() * 0.05})`; g.lineWidth = 0.6 + R() * 1.6;
+    g.beginPath();
+    for (let x = 0; x <= S; x += 4) { const y = y0 + amp * Math.sin(x * fr + ph); x ? g.lineTo(x, y) : g.moveTo(x, y); }
+    g.stroke();
+  }
+  return ctx.createPattern(c, 'repeat');
+}
+
+// ---------- title cartouche and seal ----------
+function drawCartouche(g) {
+  const s = clamp(U, 0.7, 1.2);
+  const w = 40 * s, h = 150 * s, x = W - w - 28 * s, y = 26 * s;
+  g.fillStyle = '#f2e6c9'; g.fillRect(x, y, w, h);
+  g.strokeStyle = PAL.ink;
+  g.lineWidth = 1.6 * s; g.strokeRect(x, y, w, h);
+  g.lineWidth = 0.7 * s; g.strokeRect(x + 3 * s, y + 3 * s, w - 6 * s, h - 6 * s);
+  const font = '"Hiragino Mincho ProN","Songti SC","Noto Serif CJK JP","Yu Mincho",serif';
+  g.fillStyle = PAL.ink; g.font = `${24 * s}px ${font}`; g.textAlign = 'center'; g.textBaseline = 'middle';
+  const title = '波濤無盡';
+  for (let i = 0; i < title.length; i++) g.fillText(title[i], x + w / 2, y + h * (i + 0.5) / title.length);
+  const ss = 26 * s, qx = x + (w - ss) / 2, qy = y + h + 10 * s;
+  g.fillStyle = PAL.seal; g.fillRect(qx, qy, ss, ss);
+  g.fillStyle = '#f3e9d2'; g.font = `bold ${18 * s}px ${font}`;
+  g.fillText('浪', qx + ss / 2, qy + ss / 2 + s);
+}
+
+// ---------- setup, input, loop ----------
+function resize() {
+  const oldU = U;
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  W = innerWidth; H = innerHeight;
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+  U = Math.min(H / 800, W / 520);
+  HORIZON = H * 0.42;
+  CWd = Math.round(Math.max(512, 520 * U) * DPR);
+  CW = CWd / DPR;
+  FW = 520 * U;
+  STEP = Math.max(1.5, 3 * U);
+  REG = [0.8 * U, 0.5 * U];
+  if (oldU) camX *= U / oldU;
+  VIGNETTE = ctx.createRadialGradient(W / 2, H / 2, Math.max(W, H) * 0.45, W / 2, H / 2, Math.max(W, H) * 0.85);
+  VIGNETTE.addColorStop(0, 'rgba(80,55,25,0)'); VIGNETTE.addColorStop(1, 'rgba(80,55,25,0.22)');
+  reset();
+}
+
+function reset() {
+  SEED = hashStr(seedStr);
+  chunkCache.clear(); featCache.clear(); waveCache.clear();
+  makeRows();
+  hint.textContent = `#${seedStr}  ·  drag / scroll to travel  ·  space: pause  ·  R: new sea  ·  S: save`;
+  report();
+}
+
+function report() {
+  if (EMBED) parent.postMessage({ type: 'waves:state', seed: seedStr, drifting }, '*');
+}
+
+function loadSeed() {
+  seedStr = decodeURIComponent(location.hash.slice(1)) || Math.random().toString(36).slice(2, 8);
+  if (!location.hash) history.replaceState(null, '', '#' + seedStr);
+}
+
+let camX = 0, vel = 0, drifting = true, dragging = false, lastPX = 0, lastMove = 0;
+if (EMBED && matchMedia('(prefers-reduced-motion: reduce)').matches) drifting = false;
+cv.addEventListener('pointerdown', e => {
+  dragging = true; lastPX = e.clientX; lastMove = performance.now(); vel = 0;
+  cv.setPointerCapture(e.pointerId); cv.classList.add('drag');
+});
+cv.addEventListener('pointermove', e => {
+  if (!dragging) return;
+  const dx = e.clientX - lastPX, now = performance.now(), dt = Math.max(1, now - lastMove) / 1000;
+  lastPX = e.clientX; lastMove = now; camX -= dx;
+  vel = 0.5 * vel + 0.5 * (-dx / dt);
+});
+const endDrag = () => {
+  if (!dragging) return;
+  dragging = false; cv.classList.remove('drag');
+  if (performance.now() - lastMove > 80) vel = 0;
+};
+cv.addEventListener('pointerup', endDrag);
+cv.addEventListener('pointercancel', endDrag);
+cv.addEventListener('wheel', e => {
+  if (EMBED && Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
+  e.preventDefault(); camX += EMBED ? e.deltaX : e.deltaX + e.deltaY;
+}, { passive: false });
+addEventListener('keydown', e => {
+  if (e.key === ' ') { drifting = !drifting; report(); e.preventDefault(); }
+  else if (e.key === 'ArrowRight') vel += 900;
+  else if (e.key === 'ArrowLeft') vel -= 900;
+  else if (e.key === 'r' || e.key === 'R') { location.hash = Math.random().toString(36).slice(2, 8); }
+  else if (e.key === 's' || e.key === 'S') {
+    cv.toBlob(b => { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = `waves-${seedStr}.png`; a.click(); });
+  }
+});
+addEventListener('message', e => {
+  if (e.source !== parent || !e.data || e.data.type !== 'waves') return;
+  const { action, value } = e.data;
+  if (action === 'new') location.replace('#' + Math.random().toString(36).slice(2, 8));   // no history entry
+  else if (action === 'toggle') { drifting = !drifting; report(); }
+  else if (action === 'visible') onScreen = value;
+  else if (action === 'hello') report();
+});
+addEventListener('hashchange', () => { loadSeed(); camX = 0; reset(); });
+addEventListener('resize', resize);
+
+function draw() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const cx = Math.round(camX * DPR);
+  const i0 = Math.floor(cx / CWd), i1 = Math.floor((cx + cv.width) / CWd);
+  for (let i = i0; i <= i1; i++) ctx.drawImage(getChunk(i), i * CWd - cx, 0);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.fillStyle = VIGNETTE; ctx.fillRect(0, 0, W, H);
+  drawCartouche(ctx);
+}
+
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  if (!onScreen) { requestAnimationFrame(frame); return; }
+  if (!dragging) {
+    camX += (vel + (drifting ? DRIFT * U : 0)) * dt;
+    vel *= Math.pow(0.08, dt);
+  }
+  draw();
+  requestAnimationFrame(frame);
+}
+
+loadSeed();
+PAPER = makePaper();
+resize();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

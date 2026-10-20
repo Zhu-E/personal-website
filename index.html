@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Edward Zhu</title>
+  <meta name="description" content="Edward Zhu — UC Irvine computer science student and CPTC global champion, focused on security and AI.">
+  <meta name="theme-color" content="#f4ecda" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0e1626" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300..700&amp;family=DM+Mono:wght@400;500&amp;family=Fraunces:ital,opsz,wght,SOFT,WONK@0,9..144,300..800,0..100,0..1;1,9..144,300..800,0..100,0..1&amp;display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script src="main.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="masthead wrap">
+    <a class="brand" href="#top" aria-label="Edward Zhu, home">
+      <span class="seal" aria-hidden="true">EZ</span>
+      <span class="brand-name">Edward Zhu</span>
+    </a>
+    <nav aria-label="Primary">
+      <ul>
+        <li><a href="projects.html">Projects</a></li>
+        <li><a href="blog.html">Blog</a></li>
+        <li><a href="#about">About</a></li>
+        <li><a class="btn-outline" href="assets/resume.pdf" target="_blank" rel="noopener">Resume <span aria-hidden="true">↗</span></a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero wrap" id="top" aria-label="Introduction">
+      <!-- the banner: a live, procedurally generated ukiyo-e sea -->
+      <figure class="print">
+        <div class="print-frame">
+          <iframe id="waves" src="art/waves.html" title="Endless Waves: an animated, procedurally generated ukiyo-e seascape. Drag sideways to travel." loading="eager"></iframe>
+        </div>
+        <figcaption class="print-caption">
+          <p><span class="work-title">Endless Waves</span>, 2026. A sea that never repeats, generated live in your browser. Drag it sideways to travel.</p>
+          <div class="print-controls">
+            <span class="seed" id="seed" aria-live="polite"></span>
+            <button type="button" id="wave-new">New sea <span aria-hidden="true">↻</span></button>
+            <button type="button" id="wave-toggle" aria-pressed="false">Pause</button>
+            <a href="art/waves.html" target="_blank" rel="noopener">Full screen <span aria-hidden="true">↗</span></a>
+          </div>
+        </figcaption>
+      </figure>
+
+      <div class="hero-about" id="about">
+        <!-- the portrait floats right and the introduction wraps around it -->
+        <div class="about-flow">
+          <div class="portrait">
+            <img src="assets/profile-photo.jpg" alt="Edward Zhu smiling on a lookout above the water" width="800" height="800">
+          </div>
+          <p class="lede">
+            I'm Eddie, a computer science student at UC&nbsp;Irvine. I love all things coding,
+            with a particular interest in <em>security</em> and <em>AI</em>.
+          </p>
+          <p>
+            I'm finishing a B.S. in computer science with a minor in mathematics at the University of California,
+            Irvine, graduating in December 2026.
+          </p>
+          <p>
+            My main passions in computer science are security and AI. On the security side, I work on both offense
+            and defense. I'm a CPTC Global Champion, having won the Collegiate Penetration Testing Competition's
+            Global Finals with UCI's team. Before that, I competed on UCI's cyber defense team, where I was an
+            alternate on our national champion team. I've pen-tested internal web apps for the university and often
+            play CTFs.
+          </p>
+          <p>
+            As for AI, I've built an MCP server that connects LLMs to internal tools, orchestrated a multi-agent
+            penetration testing pipeline with Claude Code for CPTC, and created a RAG assistant for Google Docs.
+          </p>
+        </div>
+        <div class="intro-meta">
+          <ul class="links">
+            <li><a href="https://github.com/zhu-e" target="_blank" rel="noopener">GitHub</a></li>
+            <li><a href="https://www.linkedin.com/in/edwardzhu1/" target="_blank" rel="noopener">LinkedIn</a></li>
+            <li><a href="https://leetcode.com/u/3dd13zhu/" target="_blank" rel="noopener">LeetCode</a></li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="featured wrap" aria-label="Featured projects and blog posts">
+      <div class="featured-col" id="work">
+        <div class="col-head">
+          <h2>Featured projects</h2>
+          <a class="see-all" href="projects.html">All projects <span aria-hidden="true">→</span></a>
+        </div>
+        <ul class="cards">
+          <li class="card">
+            <div class="card-head">
+              <h3><a class="card-link" href="projects.html#typst-local">Typst Local</a></h3>
+              <span class="card-meta">2026</span>
+            </div>
+            <p>A self-hosted, real-time collaborative Typst editor with a live preview.</p>
+            <div class="card-foot">
+              <ul class="tags"><li>JavaScript</li><li>Rust</li><li>Yjs</li></ul>
+              <a class="card-gh" href="https://github.com/Zhu-E/typst-local" target="_blank" rel="noopener">GitHub <span aria-hidden="true">↗</span></a>
+            </div>
+          </li>
+          <li class="card">
+            <div class="card-head">
+              <h3><a class="card-link" href="projects.html#endless-waves">Endless Waves</a></h3>
+              <span class="card-meta">2026</span>
+            </div>
+            <p>An infinite, procedurally generated ukiyo-e seascape. It's the piece at the top of this page.</p>
+            <div class="card-foot">
+              <ul class="tags"><li>JavaScript</li><li>Canvas 2D</li></ul>
+              <a class="card-gh" href="https://github.com/Zhu-E/endless-waves" target="_blank" rel="noopener">GitHub <span aria-hidden="true">↗</span></a>
+            </div>
+          </li>
+          <li class="card">
+            <div class="card-head">
+              <h3><a class="card-link" href="projects.html#malicious-terraria-mod">Malicious Terraria Mod</a></h3>
+              <span class="card-meta">2026</span>
+            </div>
+            <p>A proof-of-concept game mod that opens a reverse shell as soon as it's loaded.</p>
+            <div class="card-foot">
+              <ul class="tags"><li>C#</li><li>tModLoader</li></ul>
+              <a class="card-gh" href="https://github.com/Zhu-E/MaliciousTerarriaMod" target="_blank" rel="noopener">GitHub <span aria-hidden="true">↗</span></a>
+            </div>
+          </li>
+          <li class="card">
+            <div class="card-head">
+              <h3><a class="card-link" href="projects.html#google-drive-rag">Google Drive RAG</a></h3>
+              <span class="card-meta">2024</span>
+            </div>
+            <p>An assistant that answers questions from your own Google Docs using retrieval-augmented generation.</p>
+            <div class="card-foot">
+              <ul class="tags"><li>Python</li><li>OpenAI API</li><li>Embeddings</li></ul>
+              <a class="card-gh" href="https://github.com/Zhu-E/GoogleDriveRAG" target="_blank" rel="noopener">GitHub <span aria-hidden="true">↗</span></a>
+            </div>
+          </li>
+        </ul>
+      </div>
+
+      <div class="featured-col" id="blog">
+        <div class="col-head">
+          <h2>Featured blog posts</h2>
+          <a class="see-all" href="blog.html">All posts <span aria-hidden="true">→</span></a>
+        </div>
+        <!-- featured posts use the same markup as the projects, inside <ul class="cards">; see README.md -->
+        <p class="empty">No posts yet. Check back soon.</p>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="footer">
+    <div class="seigaiha" aria-hidden="true"></div>
+    <div class="wrap footer-inner">
+      <div class="footer-row">
+        <ul class="links">
+          <li><a href="https://github.com/zhu-e" target="_blank" rel="noopener">GitHub</a></li>
+          <li><a href="https://www.linkedin.com/in/edwardzhu1/" target="_blank" rel="noopener">LinkedIn</a></li>
+          <li><a href="https://leetcode.com/u/3dd13zhu/" target="_blank" rel="noopener">LeetCode</a></li>
+          <li><a href="assets/resume.pdf" target="_blank" rel="noopener">Resume</a></li>
+        </ul>
+        <p class="fine">© <span id="year">2026</span> Edward Zhu</p>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

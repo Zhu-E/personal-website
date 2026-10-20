@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Projects · Edward Zhu</title>
+  <meta name="description" content="Projects by Edward Zhu: security, AI, systems programming and generative art.">
+  <meta name="theme-color" content="#f4ecda" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0e1626" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300..700&amp;family=DM+Mono:wght@400;500&amp;family=Fraunces:ital,opsz,wght,SOFT,WONK@0,9..144,300..800,0..100,0..1;1,9..144,300..800,0..100,0..1&amp;display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script src="main.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="masthead wrap">
+    <a class="brand" href="index.html" aria-label="Edward Zhu, home">
+      <span class="seal" aria-hidden="true">EZ</span>
+      <span class="brand-name">Edward Zhu</span>
+    </a>
+    <nav aria-label="Primary">
+      <ul>
+        <li><a href="projects.html">Projects</a></li>
+        <li><a href="blog.html">Blog</a></li>
+        <li><a href="index.html#about">About</a></li>
+        <li><a class="btn-outline" href="assets/resume.pdf" target="_blank" rel="noopener">Resume <span aria-hidden="true">↗</span></a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main id="main">
+    <header class="page-head wrap narrow">
+      <a class="back" href="index.html"><span aria-hidden="true">←</span> Home</a>
+      <h1>Projects</h1>
+      <div class="sort">
+        <label for="project-sort">Sort</label>
+        <span class="select-wrap">
+          <select id="project-sort" data-sorts=".page-body .entries">
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+          </select>
+        </span>
+      </div>
+    </header>
+
+    <section class="page-body wrap narrow" aria-label="All projects">
+      <ol class="entries">
+        <li class="entry" id="typst-local">
+          <span class="year">2026</span>
+          <div class="entry-body">
+            <div class="entry-head">
+              <h3>Typst Local</h3>
+              <a class="entry-link" href="https://github.com/Zhu-E/typst-local" target="_blank" rel="noopener">GitHub <span aria-hidden="true">↗</span></a>
+            </div>
+            <p>A self-hosted, real-time collaborative Typst editor. Run it on one machine and everyone on the network can edit together in the browser, with a live preview.</p>
+            <ul class="tags"><li>JavaScript</li><li>Rust</li><li>Node.js</li><li>Yjs</li><li>CodeMirror 6</li><li>WebSockets</li><li>Docker</li></ul>
+            <details>
+              <summary>Details</summary>
+              <ul class="features">
+                <li>Real-time collaboration over Yjs CRDTs, with everyone's cursors and selections shown by name</li>
+                <li>Recompiles on every change and pushes only the pages that changed, using a Rust compile engine to keep previews fast</li>
+                <li>Version history where every version is a real git commit, so a project's history can be cloned over HTTP</li>
+                <li>Exports to PDF, to a Word document styled to match the PDF, and to a source zip</li>
+                <li>One setup script for macOS and Debian-based Linux, or run it as a Docker container</li>
+              </ul>
+            </details>
+          </div>
+        </li>
+
+        <li class="entry" id="endless-waves">
+          <span class="year">2026</span>
+          <div class="entry-body">
+            <div class="entry-head">
+              <h3>Endless Waves</h3>
+              <span class="entry-links">
+                <a class="entry-link" href="art/waves.html" target="_blank" rel="noopener">Open <span aria-hidden="true">↗</span></a>
+                <a class="entry-link" href="https://github.com/Zhu-E/endless-waves" target="_blank" rel="noopener">GitHub <span aria-hidden="true">↗</span></a>
+              </span>
+            </div>
+            <p>An infinite ukiyo-e seascape in the style of Hokusai, drawn entirely with code. It's the banner on my homepage.</p>
+            <ul class="tags"><li>JavaScript</li><li>Canvas 2D</li><li>Procedural generation</li></ul>
+            <details>
+              <summary>Details</summary>
+              <ul class="features">
+                <li>Deterministic from a seed in the URL, so a given <code>#seed</code> is always the same sea</li>
+                <li>Great waves built from tapering spiral bands with branching claws of foam</li>
+                <li>Coastlines, villages, torii gates, ships and mountains placed on jittered grids, so nothing repeats or clumps</li>
+                <li>Rendered in cached chunks with woodblock paper grain and slightly off-register ink outlines</li>
+              </ul>
+            </details>
+          </div>
+        </li>
+
+        <li class="entry" id="malicious-terraria-mod">
+          <span class="year">2026</span>
+          <div class="entry-body">
+            <div class="entry-head">
+              <h3>Malicious Terraria Mod</h3>
+              <a class="entry-link" href="https://github.com/Zhu-E/MaliciousTerarriaMod" target="_blank" rel="noopener">GitHub <span aria-hidden="true">↗</span></a>
+            </div>
+            <p>A proof-of-concept Terraria mod that opens a reverse shell as soon as it's loaded, built to learn how a malicious game mod can lead to remote code execution.</p>
+            <ul class="tags"><li>C#</li><li>tModLoader</li><li>Reverse shell</li></ul>
+            <details>
+              <summary>Details</summary>
+              <ul class="features">
+                <li>Spawns a reverse shell to a listener on localhost when tModLoader loads the mod</li>
+                <li>Never published to the Steam Workshop; it exists purely as a learning proof of concept</li>
+              </ul>
+            </details>
+          </div>
+        </li>
+
+        <li class="entry" id="course-registration-server">
+          <span class="year">2025</span>
+          <div class="entry-body">
+            <div class="entry-head">
+              <h3>Course Registration Server</h3>
+            </div>
+            <p>A multithreaded server in C that lets many students register for courses at the same time.</p>
+            <ul class="tags"><li>C</li><li>Multithreading</li><li>Sockets</li><li>Signal handling</li></ul>
+            <details>
+              <summary>Details</summary>
+              <ul class="features">
+                <li>Built a reader-first reader-writer lock from mutexes to maximize concurrent reads</li>
+                <li>Creates sockets dynamically so many clients can connect simultaneously</li>
+                <li>Shuts down gracefully on SIGINT through custom signal handling</li>
+              </ul>
+            </details>
+          </div>
+        </li>
+
+        <li class="entry" id="interactive-shell">
+          <span class="year">2025</span>
+          <div class="entry-body">
+            <div class="entry-head">
+              <h3>Interactive Shell</h3>
+            </div>
+            <p>A Unix-style shell written in C, with built-in commands, custom scripts, pipes, I/O redirection and background jobs.</p>
+            <ul class="tags"><li>C</li><li>fork / exec</li><li>Pipes</li><li>File descriptors</li></ul>
+            <details>
+              <summary>Details</summary>
+              <ul class="features">
+                <li>Forks a new subprocess for each job, and can run jobs in the background</li>
+                <li>Chains commands with pipes and redirects input and output by rewiring file descriptors</li>
+                <li>Runs custom scripts alongside its built-in commands</li>
+              </ul>
+            </details>
+          </div>
+        </li>
+
+        <li class="entry" id="google-drive-rag">
+          <span class="year">2024</span>
+          <div class="entry-body">
+            <div class="entry-head">
+              <h3>Google Drive RAG</h3>
+              <a class="entry-link" href="https://github.com/Zhu-E/GoogleDriveRAG" target="_blank" rel="noopener">GitHub <span aria-hidden="true">↗</span></a>
+            </div>
+            <p>An end-to-end RAG assistant that answers questions from your own Google Docs.</p>
+            <ul class="tags"><li>Python</li><li>OpenAI API</li><li>Vector embeddings</li><li>Pandas</li><li>Google OAuth</li><li>Google Drive API</li></ul>
+            <details>
+              <summary>Details</summary>
+              <ul class="features">
+                <li>Connects to a user's Google Drive securely through Google OAuth</li>
+                <li>Pulls documents with the Drive API and stores their content as CSV</li>
+                <li>Embeds each document with OpenAI's Embedding API and ranks them against the query with vector search</li>
+                <li>Writes answers with GPT, grounded in the documents it retrieved</li>
+              </ul>
+            </details>
+          </div>
+        </li>
+
+        <li class="entry" id="twitch-clip-bot">
+          <span class="year">2024</span>
+          <div class="entry-body">
+            <div class="entry-head">
+              <h3>Twitch Clip Compilation Bot</h3>
+              <a class="entry-link" href="https://github.com/Zhu-E/auto_highlights_bot_revisited" target="_blank" rel="noopener">GitHub <span aria-hidden="true">↗</span></a>
+            </div>
+            <p>Finds the most popular clips on Twitch, cuts them into a single compilation and uploads it to YouTube, with no manual editing.</p>
+            <ul class="tags"><li>Python</li><li>Twitch API</li><li>Selenium</li><li>FFmpeg</li><li>YouTube API</li><li>Google OAuth</li></ul>
+            <details>
+              <summary>Details</summary>
+              <ul class="features">
+                <li>Pulls a configurable number of top clips for a chosen time window from the Twitch API</li>
+                <li>Downloads the clips with Selenium-based web scraping</li>
+                <li>Merges and formats them into one highlight video with FFmpeg</li>
+                <li>Uploads the result through the YouTube Data API, authenticated with Google OAuth</li>
+              </ul>
+            </details>
+          </div>
+        </li>
+      </ol>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="seigaiha" aria-hidden="true"></div>
+    <div class="wrap footer-inner">
+      <div class="footer-row">
+        <ul class="links">
+          <li><a href="https://github.com/zhu-e" target="_blank" rel="noopener">GitHub</a></li>
+          <li><a href="https://www.linkedin.com/in/edwardzhu1/" target="_blank" rel="noopener">LinkedIn</a></li>
+          <li><a href="https://leetcode.com/u/3dd13zhu/" target="_blank" rel="noopener">LeetCode</a></li>
+          <li><a href="assets/resume.pdf" target="_blank" rel="noopener">Resume</a></li>
+        </ul>
+        <p class="fine">© <span id="year">2026</span> Edward Zhu</p>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>
